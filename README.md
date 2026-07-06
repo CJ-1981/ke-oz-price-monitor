@@ -1,25 +1,26 @@
 # KE / OZ Flight Price Monitor
 
 A static web app for monitoring **Korean Air (KE)** and **Asiana Airlines (OZ)**
-flight prices from Seoul Incheon (ICN) to the United States.
+flight prices on popular long-haul routes (FRA↔ICN, ICN↔LAX/JFK/SFO).
 
 Built for **GitHub Pages** — no backend required. Price snapshots are fetched
-daily by a GitHub Actions cron job and committed to `data/prices.json`, which
-the frontend reads at load time.
+daily by a GitHub Actions cron job using the **Duffel API** and committed to
+`data/prices.json`, which the frontend reads at load time.
 
 ---
 
 ## Features
 
-- **Three routes** out of the box: ICN ↔ LAX, ICN ↔ JFK, ICN ↔ SFO
-- **Side-by-side cards** showing latest KE and OZ prices with day-over-day delta
+- **Four routes** out of the box: FRA ↔ ICN (default), ICN ↔ LAX, ICN ↔ JFK, ICN ↔ SFO
+- **Side-by-side cards** showing latest KE and OZ prices with day-over-day delta + booking links
 - **90-day line chart** (Chart.js) with toggleable airlines
 - **Stats panel**: 90-day low/high/avg, 30-day avg, average cheaper airline,
   plus a plain-English booking recommendation
 - **Recent snapshots table** (last 14 days) with cheaper-airline highlight
-- **Mobile-responsive** layout
+- **Mobile-responsive** layout with iOS PWA support (apple-touch-icon, manifest)
 - **Brand-colored theme**: KE blue `#00256C`, OZ red `#C8102E`
-- **EUR as default currency** (configurable in `fetch_prices.py` and `generate_mock_prices.py`)
+- **EUR as default currency** (configurable in `fetch_prices.py`)
+- **Friendly empty state** when no snapshots exist yet (until the first fetch runs)
 - **No build step, no framework** — just HTML/CSS/vanilla JS
 
 ---
@@ -31,9 +32,11 @@ flight-price-monitor/
 ├── index.html                  # Dashboard markup
 ├── css/styles.css              # All styling
 ├── js/app.js                   # Dashboard logic (vanilla JS + Chart.js)
-├── data/prices.json            # 90-day snapshots (mock data initially)
+├── data/prices.json            # Snapshot history (skeleton until first fetch)
+├── manifest.json               # PWA manifest
+├── icons/                      # Apple-touch-icon, PWA icons, favicons
 ├── scripts/
-│   └── fetch_prices.py         # Amadeus API fetcher (run by GitHub Actions)
+│   └── fetch_prices.py         # Duffel API fetcher (run by GitHub Actions)
 ├── .github/workflows/
 │   ├── fetch-prices.yml        # Daily cron: fetch prices, commit JSON
 │   └── deploy.yml              # Deploy static site to GitHub Pages
@@ -56,8 +59,9 @@ python3 -m http.server 8000
 npx serve flight-price-monitor
 ```
 
-The repo ships with **mock data** in `data/prices.json` so you can see the
-dashboard working immediately without setting up any API keys.
+The repo ships with a **skeleton `data/prices.json`** (4 routes defined, empty
+price arrays). The dashboard renders a friendly empty state with booking
+links until the first fetch populates real prices.
 
 ---
 
@@ -91,45 +95,51 @@ dashboard working immediately without setting up any API keys.
 
 ---
 
-## Enabling live prices (Amadeus API)
+## Enabling live prices (Duffel API)
 
-The default `data/prices.json` contains mock data. To switch to live snapshots:
+The default `data/prices.json` is a skeleton with no snapshots. To populate
+real prices:
 
-### 1. Get Amadeus API credentials
+### 1. Get a Duffel API key
 
-1. Sign up at <https://developers.amadeus.com/> (free).
-2. Create a self-service app.
-3. Copy your **API key** (`client_id`) and **API secret** (`client_secret`).
+1. Sign up at <https://app.duffel.com/> (free, email only — no business
+   verification required for the sandbox).
+2. Go to **Dashboard → Access tokens → Create new token**.
+3. Copy the token. It starts with `test_` (sandbox) or `live_` (production).
 
-The free tier allows ~2,000 calls/month — plenty for 3 routes × 1 daily run
-(~90 calls/month).
+**Sandbox vs live:**
+- `test_*` tokens: unlimited calls, real airlines, **shuffled/dummy prices**.
+  Great for wiring up the pipeline — you'll see prices populate, just not the
+  real numbers.
+- `live_*` tokens: real prices, but require Duffel account verification (a
+  short form + ID check). Use this once you've confirmed the pipeline works.
 
-### 2. Add credentials as repo secrets
+### 2. Add the token as a repo secret
 
 In your GitHub repo: **Settings → Secrets and variables → Actions → New repository secret**
 
 | Name | Value |
 |------|-------|
-| `AMADEUS_CLIENT_ID` | your client_id |
-| `AMADEUS_CLIENT_SECRET` | your client_secret |
+| `DUFFEL_ACCESS_TOKEN` | your `test_...` or `live_...` token |
 
-### 3. Enable the workflow
+### 3. Trigger the first fetch
 
-`.github/workflows/fetch-prices.yml` runs daily at 09:00 UTC (~6 PM KST).
-You can also trigger it manually from the **Actions** tab → "Fetch flight
-prices" → "Run workflow".
+`.github/workflows/fetch-prices.yml` runs daily at 09:00 UTC. For the first
+run, trigger it manually:
+
+1. Go to **Actions → Fetch flight prices → Run workflow → Run workflow**.
+2. Wait ~1 minute, then refresh the dashboard.
 
 The workflow:
-1. Calls `scripts/fetch_prices.py`, which queries Amadeus for each route.
-2. Picks the cheapest KE and OZ economy round-trip offer.
+1. Calls `scripts/fetch_prices.py`, which queries Duffel for each route.
+2. Picks the cheapest KE and OZ economy round-trip offer per route.
 3. Appends today's snapshot to `data/prices.json` (preserving history).
 4. Commits the file back to `main`, which triggers a Pages redeploy.
 
-### 4. Switch from test to production API (optional)
+### 4. Switch from sandbox to live (optional)
 
-By default the script uses `test.api.amadeus.com`. To use the production
-endpoint (higher rate limits), set the `AMADEUS_HOST` env var in the workflow
-to `api.amadeus.com`.
+Once your Duffel account is verified for live access, generate a `live_*`
+token and replace the `DUFFEL_ACCESS_TOKEN` secret. No code changes needed.
 
 ---
 
@@ -137,17 +147,15 @@ to `api.amadeus.com`.
 
 Edit the `ROUTES` list in **two** places:
 
-- `scripts/generate_mock_prices.py` (mock data baseline prices)
-- `scripts/fetch_prices.py` (live API calls)
-
-Then regenerate mock data:
-```bash
-python3 scripts/generate_mock_prices.py
-```
+- `scripts/fetch_prices.py` — controls which routes the Duffel fetcher queries
+- `data/prices.json` — controls which tabs appear in the dashboard
+  (regenerate via `scripts/generate_skeleton_prices.py` after editing)
 
 Common IATA codes you may want:
 - **Asia hubs**: ICN (Seoul Incheon), NRT (Tokyo Narita), KIX (Osaka),
   BKK (Bangkok), SIN (Singapore), TPE (Taipei), HKG (Hong Kong)
+- **Europe hubs**: FRA (Frankfurt), CDG (Paris), LHR (London Heathrow),
+  AMS (Amsterdam), MUC (Munich), ZRH (Zurich), VIE (Vienna)
 - **US hubs**: LAX, JFK, SFO, ORD (Chicago), SEA (Seattle), ATL (Atlanta),
   DFW (Dallas), IAD (Washington Dulles), EWR (Newark)
 
@@ -158,7 +166,7 @@ Common IATA codes you may want:
 ```
 GitHub Actions (daily cron)
         ↓
-  Amadeus Flight Offers API
+  Duffel Air Offer Requests API
         ↓
   fetch_prices.py picks cheapest KE + OZ per route
         ↓
@@ -179,10 +187,11 @@ browser bundle, so they're safe.
 - **Prices are snapshots, not live quotes.** A snapshot taken at 09:00 UTC may
   not match what you see on the airline site at 21:00 UTC. Use the dashboard
   for trend tracking, then verify before booking.
-- **Amadeus test environment** doesn't always return real-time inventory for
-  every airline on every route. Korean Air (KE) and Asiana (OZ) are both
-  covered, but if a route returns 0 offers, the snapshot is simply skipped
-  for that day.
+- **Duffel sandbox returns shuffled prices** with `test_*` tokens. Use a
+  `live_*` token once your account is verified to see real prices.
+- **Codeshares may double-count.** Duffel sometimes returns the same physical
+  flight marketed under both KE and a partner (e.g. Delta). The fetcher uses
+  `owner.iata_code` (the ticketing carrier) as the source of truth.
 - **No alerts in this version.** If you want email/push notifications, the
   easiest path is to extend `fetch_prices.py` to call EmailJS or SendGrid
   when a price drops below your threshold.

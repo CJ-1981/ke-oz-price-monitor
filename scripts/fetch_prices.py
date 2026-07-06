@@ -1,18 +1,21 @@
 """
-Fetch Korean Air (KE) and Asiana (OZ) flight prices from the Amadeus
-Self-Service API and merge them into data/prices.json.
+Fetch Korean Air (KE) and Asiana (OZ) flight prices from the Duffel API
+and merge them into data/prices.json.
 
-Designed to run inside GitHub Actions. API credentials come from env vars
- AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET (configured as repo secrets).
+Duffel API docs: https://duffel.com/docs/api
 
-The script:
-  1. Reads the existing data/prices.json (preserves history)
-  2. Calls Amadeus Flight Offers Search for each route, filtered to KE and OZ
-  3. Picks the cheapest economy round-trip offer per airline per route
-  4. Appends today's snapshot to the ke/oz arrays
-  5. Writes back to data/prices.json
+Key differences from Amadeus:
+  - Single API key (Bearer token) — no OAuth dance
+  - Test key (test_*) returns real airlines with shuffled prices
+  - Live key (live_*) returns real prices (requires account verification)
+  - Round-trip search = two slices (outbound + return) in one request
 
-If run without credentials (e.g. local dev), it exits gracefully with a note.
+Setup:
+  1. Sign up at https://app.duffel.com/ (email only)
+  2. Grab your API key from the dashboard
+  3. Add it as repo secret: DUFFEL_ACCESS_TOKEN
+
+If run without credentials (e.g. local dev), it exits gracefully.
 """
 from __future__ import annotations
 
@@ -21,7 +24,7 @@ import os
 import sys
 import urllib.request
 import urllib.error
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 # ---------------------------------------------------------------- config
@@ -36,105 +39,101 @@ ROUTES = [
 DAYS_OUT = 60
 TRIP_DAYS = 7
 ADULTS = 1
+CABIN_CLASS = "economy"  # economy | premium_economy | business | first
 CURRENCY = "EUR"
-MAX_OFFERS = 50
+
+DUFFEL_API = "https://api.duffel.com/air/offer_requests?return_offers=true"
+DUFFEL_VERSION = "v1"  # bump if Duffel releases a new API version
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "prices.json"
 
 
 # ---------------------------------------------------------------- http
-def http_post(url: str, body: dict | str, headers: dict, form: bool = False) -> dict:
-    data = body if isinstance(body, str) else json.dumps(body)
-    if form:
-        data = body  # already urlencoded string
-        headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
-    else:
-        headers.setdefault("Content-Type", "application/json")
-    req = urllib.request.Request(url, data=data.encode("utf-8"), headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+def http_post_json(url: str, body: dict, headers: dict) -> dict:
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", "ignore")[:500]
+        raise RuntimeError(f"HTTP {e.code}: {err_body}") from e
 
 
-def http_get(url: str, headers: dict) -> dict:
-    req = urllib.request.Request(url, headers=headers, method="GET")
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+# ---------------------------------------------------------------- duffel
+def search_offers(token: str, origin: str, dest: str) -> list[dict]:
+    """Create an offer request for a round-trip and return the offers list."""
+    dep_date = (date.today() + timedelta(days=DAYS_OUT)).strftime("%Y-%m-%d")
+    ret_date = (date.today() + timedelta(days=DAYS_OUT + TRIP_DAYS)).strftime("%Y-%m-%d")
 
+    body = {
+        "data": {
+            "slices": [
+                {"origin": origin, "destination": dest, "departure_date": dep_date},
+                {"origin": dest, "destination": origin, "departure_date": ret_date},
+            ],
+            "passengers": [{"type": "adult"} for _ in range(ADULTS)],
+            "cabin_class": CABIN_CLASS,
+        }
+    }
 
-# ---------------------------------------------------------------- amadeus
-def get_access_token(client_id: str, client_secret: str) -> str:
-    # Use the test environment by default; switch to api.amadeus.com for production
-    host = os.environ.get("AMADEUS_HOST", "test.api.amadeus.com")
-    body = (
-        f"grant_type=client_credentials"
-        f"&client_id={client_id}"
-        f"&client_secret={client_secret}"
-    )
-    resp = http_post(
-        f"https://{host}/v1/security/oauth2/token",
-        body,
-        headers={},
-        form=True,
-    )
-    return resp["access_token"]
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Duffel-Version": DUFFEL_VERSION,
+        "Accept-Encoding": "gzip",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
 
-
-def search_offers(token: str, origin: str, dest: str) -> dict:
-    host = os.environ.get("AMADEUS_HOST", "test.api.amadeus.com")
-    dep = (date.today() + timedelta(days=DAYS_OUT)).strftime("%Y-%m-%d")
-    ret = (date.today() + timedelta(days=DAYS_OUT + TRIP_DAYS)).strftime("%Y-%m-%d")
-    qs = (
-        f"?originLocationCode={origin}"
-        f"&destinationLocationCode={dest}"
-        f"&departureDate={dep}"
-        f"&returnDate={ret}"
-        f"&adults={ADULTS}"
-        f"&currencyCode={CURRENCY}"
-        f"&max={MAX_OFFERS}"
-        f"&nonStop=false"
-    )
-    url = f"https://{host}/v2/shopping/flight-offers{qs}"
-    return http_get(url, headers={"Authorization": f"Bearer {token}"})
+    resp = http_post_json(DUFFEL_API, body, headers)
+    return resp.get("data", {}).get("offers", [])
 
 
 def cheapest_per_carrier(offers: list[dict]) -> dict[str, float]:
-    """Return {carrier_code: lowest_price} for economy round-trip offers."""
+    """Return {carrier_code: lowest_price} for KE / OZ offers.
+
+    Duffel may return offers where KE/OZ is the marketing carrier but not the
+    operating carrier (codeshare). We use owner.iata_code as the source of
+    truth — that's the airline whose ticket you'd actually buy.
+    """
     out: dict[str, float] = {}
-    for o in offers:
-        price = float(o.get("price", {}).get("total", "0"))
+    for offer in offers:
+        owner = offer.get("owner", {})
+        carrier = owner.get("iata_code", "")
+        if carrier not in ("KE", "OZ"):
+            continue
+        try:
+            price = float(offer.get("total_amount", "0"))
+        except (TypeError, ValueError):
+            continue
         if price <= 0:
             continue
-        # walk all segments, collect carrier codes
-        carriers = set()
-        for seg in o.get("itineraries", []):
-            for s in seg.get("segments", []):
-                carriers.add(s.get("carrierCode", ""))
-        # only keep KE / OZ
-        for c in carriers & {"KE", "OZ"}:
-            if c not in out or price < out[c]:
-                out[c] = price
+        if carrier not in out or price < out[carrier]:
+            out[carrier] = price
     return out
 
 
 # ---------------------------------------------------------------- main
 def main() -> int:
-    client_id = os.environ.get("AMADEUS_CLIENT_ID", "")
-    client_secret = os.environ.get("AMADEUS_CLIENT_SECRET", "")
-    if not client_id or not client_secret:
-        print("AMADEUS_CLIENT_ID / AMADEUS_CLIENT_SECRET not set. Skipping fetch.")
+    token = os.environ.get("DUFFEL_ACCESS_TOKEN", "")
+    if not token:
+        print("DUFFEL_ACCESS_TOKEN not set. Skipping fetch.")
+        print("Get a key at https://app.duffel.com/tokens")
         return 0
 
     if not DATA_PATH.exists():
-        print(f"ERROR: {DATA_PATH} not found. Run generate_mock_prices.py first.")
+        print(f"ERROR: {DATA_PATH} not found.")
         return 1
 
     data = json.loads(DATA_PATH.read_text(encoding="utf-8"))
     today_iso = date.today().isoformat()
-
-    print(f"Authenticating with Amadeus...")
-    token = get_access_token(client_id, client_secret)
-
     route_by_id = {r["id"]: r for r in data["routes"]}
+
+    # Keep currency in sync with this script's CURRENCY setting
+    data["meta"]["currency"] = CURRENCY.upper()
+
+    print(f"Fetching {len(ROUTES)} routes via Duffel API (version {DUFFEL_VERSION})...")
+    print(f"  departure: T+{DAYS_OUT}d, return: T+{DAYS_OUT + TRIP_DAYS}d, cabin: {CABIN_CLASS}")
 
     for r in ROUTES:
         rid = r["id"]
@@ -142,20 +141,16 @@ def main() -> int:
             print(f"  - {rid}: route not in prices.json, skipping")
             continue
         try:
-            print(f"  - Fetching {rid}...")
-            resp = search_offers(token, r["origin"], r["destination"])
-            offers = resp.get("data", [])
+            print(f"  - Fetching {rid} ({r['origin']} -> {r['destination']})...")
+            offers = search_offers(token, r["origin"], r["destination"])
             print(f"    got {len(offers)} offers")
             per_carrier = cheapest_per_carrier(offers)
             print(f"    cheapest per carrier: {per_carrier}")
-        except urllib.error.HTTPError as e:
-            print(f"    HTTP error {e.code}: {e.read().decode('utf-8', 'ignore')[:200]}")
-            continue
         except Exception as e:
             print(f"    error: {e}")
             continue
 
-        # append today's snapshot (only if not already present)
+        # append (or update) today's snapshot per carrier
         for carrier, key in [("KE", "ke"), ("OZ", "oz")]:
             if carrier not in per_carrier:
                 continue
@@ -167,7 +162,7 @@ def main() -> int:
 
     # update meta
     data["meta"]["generated_at"] = today_iso
-    data["meta"]["note"] = "Live data via Amadeus API, refreshed by GitHub Actions."
+    data["meta"]["note"] = "Live data via Duffel API, refreshed by GitHub Actions."
 
     DATA_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
     print(f"Wrote {DATA_PATH}")

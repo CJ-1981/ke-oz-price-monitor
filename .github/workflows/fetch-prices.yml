@@ -27,9 +27,7 @@ jobs:
 
       - name: Fetch prices and update data/prices.json
         env:
-          AMADEUS_CLIENT_ID: ${{ secrets.AMADEUS_CLIENT_ID }}
-          AMADEUS_CLIENT_SECRET: ${{ secrets.AMADEUS_CLIENT_SECRET }}
-          AMADEUS_HOST: test.api.amadeus.com
+          DUFFEL_ACCESS_TOKEN: ${{ secrets.DUFFEL_ACCESS_TOKEN }}
         run: python scripts/fetch_prices.py
 
       - name: Commit updated data
