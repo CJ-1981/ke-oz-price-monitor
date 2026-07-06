@@ -225,6 +225,61 @@ main { padding: 24px 0 56px; }
   color: var(--text-soft);
 }
 
+/* Booking link inside cards */
+.card-book-link {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: var(--transition);
+  background: rgba(0, 37, 108, 0.06);
+  color: var(--ke-blue);
+}
+
+.price-card.oz .card-book-link {
+  background: rgba(200, 16, 46, 0.06);
+  color: var(--oz-red);
+}
+
+.price-card.recommend .card-book-link,
+.price-card.recommend.oz .card-book-link {
+  background: rgba(27, 135, 63, 0.12);
+  color: var(--good);
+  border-color: rgba(27, 135, 63, 0.3);
+}
+
+.card-book-link:hover {
+  background: var(--ke-blue);
+  color: #fff;
+  border-color: var(--ke-blue);
+}
+
+.price-card.oz .card-book-link:hover {
+  background: var(--oz-red);
+  color: #fff;
+  border-color: var(--oz-red);
+}
+
+/* Info / empty-state card variant */
+.info-card {
+  background: linear-gradient(135deg, #fafbfd 0%, #f1f5fb 100%);
+  border-style: dashed;
+  border-color: #c5d2e3;
+}
+
+.info-card code {
+  background: rgba(0, 37, 108, 0.08);
+  color: var(--ke-blue);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
 .card-badge {
   position: absolute;
   top: 14px;

@@ -1,10 +1,11 @@
 /**
  * KE/OZ Flight Price Monitor
  * Vanilla JS dashboard. Reads data/prices.json and renders:
- *   - Latest price cards (KE vs OZ, with day-over-day delta)
+ *   - Latest price cards (KE vs OZ, with day-over-day delta + booking link)
  *   - 90-day Chart.js line chart with toggleable airlines
  *   - Stats panel (min, max, avg, 30d avg, recommendation)
  *   - Recent snapshots table (last 14 entries)
+ *   - Friendly empty-state when no snapshots exist yet
  */
 
 (() => {
@@ -18,6 +19,14 @@
   const KE_COLOR = "#00256C";
   const OZ_COLOR = "#C8102E";
 
+  // Booking deep-links (origin/destination/dates filled in at render time)
+  // Patterns chosen for stability; if airline changes URL structure, only this
+  // table needs to be updated.
+  const BOOKING_URLS = {
+    ke: "https://www.koreanair.com/global/en_us/booking/booking-search",
+    oz: "https://www.flyasiana.com/C/US/EN/index?fp=booking",
+  };
+
   const els = {
     headerUpdated: document.getElementById("meta-updated"),
     headerCurrency: document.getElementById("meta-currency"),
@@ -25,10 +34,13 @@
     routeTabs: document.getElementById("route-tabs"),
     cardsGrid: document.getElementById("cards-grid"),
     chartCanvas: document.getElementById("price-chart"),
+    chartPanel: document.querySelector(".chart-panel"),
     showKe: document.getElementById("show-ke"),
     showOz: document.getElementById("show-oz"),
     statsGrid: document.getElementById("stats-grid"),
+    statsPanel: document.querySelector(".stats-panel"),
     snapshotTbody: document.getElementById("snapshot-tbody"),
+    tablePanel: document.querySelector(".table-panel"),
   };
 
   // ---------------------------------------------------------------- utils
@@ -48,6 +60,8 @@
     const d = new Date(iso + "T00:00:00");
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
+  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   const pctChange = (prev, curr) => {
     if (!prev) return 0;
@@ -66,6 +80,19 @@
     return { min, max, avg, avg30, min30, latest: prices[prices.length - 1] };
   };
 
+  /** Build a booking URL for an airline, deep-linking to the search page. */
+  const bookingUrl = (airline, r) => {
+    const base = BOOKING_URLS[airline];
+    // Append origin/destination as query params — most booking sites ignore
+    // unknown params, but some pre-fill the search form.
+    const params = new URLSearchParams({
+      from: r.origin,
+      to: r.destination,
+      tripType: "round-trip",
+    });
+    return `${base}?${params.toString()}`;
+  };
+
   // ---------------------------------------------------------------- init
   async function init() {
     try {
@@ -74,7 +101,7 @@
       DATA = await res.json();
     } catch (err) {
       document.querySelector("main").innerHTML =
-        `<div class="state-msg error">Failed to load price data.<br><small>${err.message}</small></div>`;
+        `<div class="state-msg error">Failed to load price data.<br><small>${escapeHtml(err.message)}</small></div>`;
       return;
     }
 
@@ -114,10 +141,63 @@
   // ---------------------------------------------------------------- route
   function renderRoute() {
     const r = DATA.routes[currentRouteIdx];
+    const hasData = r.ke.length > 0 || r.oz.length > 0;
+    if (!hasData) {
+      renderEmptyState(r);
+      return;
+    }
+    // Make sure panels are visible (in case we switched from empty route)
+    els.chartPanel.style.display = "";
+    els.statsPanel.style.display = "";
+    els.tablePanel.style.display = "";
+
     renderCards(r);
     renderChart(r);
     renderStats(r);
     renderTable(r);
+  }
+
+  // ---------------------------------------------------------------- empty state
+  function renderEmptyState(r) {
+    const cur = (DATA && DATA.meta && DATA.meta.currency) || "EUR";
+    const routeLabel = `${r.origin_city} ↔ ${r.destination_city}`;
+
+    // Cards: two "no data yet" cards + a "how to enable" info card
+    const emptyCard = (airline) => `
+      <article class="price-card ${airline}">
+        <div class="card-airline">
+          <span class="airline-dot"></span>
+          ${airline === "ke" ? "Korean Air (KE)" : "Asiana Airlines (OZ)"}
+        </div>
+        <div class="card-price" style="color:var(--text-soft); font-size:22px; margin:14px 0;">No data yet</div>
+        <a class="card-book-link" href="${escapeHtml(bookingUrl(airline, r))}" target="_blank" rel="noopener noreferrer">
+          Book on ${airline === "ke" ? "Korean Air" : "Asiana"} ↗
+        </a>
+        <div class="card-footnote">${routeLabel}</div>
+      </article>
+    `;
+
+    els.cardsGrid.innerHTML =
+      emptyCard("ke") +
+      emptyCard("oz") +
+      `
+      <article class="price-card info-card">
+        <div class="card-airline">Waiting for first snapshot</div>
+        <div style="margin:10px 0; color:var(--text-muted); font-size:13px; line-height:1.6;">
+          Prices will appear here once the GitHub Actions fetcher runs.
+          Add <code>AMADEUS_CLIENT_ID</code> and <code>AMADEUS_CLIENT_SECRET</code>
+          as repo secrets, then trigger <strong>Fetch flight prices</strong> in the Actions tab.
+        </div>
+        <a class="card-book-link" href="https://github.com/CJ-1981/ke-oz-price-monitor/actions" target="_blank" rel="noopener noreferrer">
+          Open Actions tab ↗
+        </a>
+      </article>`;
+
+    // Hide the chart / stats / table — nothing to show
+    els.chartPanel.style.display = "none";
+    els.statsPanel.style.display = "none";
+    els.tablePanel.style.display = "none";
+    if (chart) { chart.destroy(); chart = null; }
   }
 
   // ---------------------------------------------------------------- cards
@@ -150,6 +230,9 @@
           ${pct > 0.3 ? "▲" : pct < -0.3 ? "▼" : "→"}
           ${pct > 0 ? "+" : ""}${pct.toFixed(1)}% vs yesterday
         </div>
+        <a class="card-book-link" href="${escapeHtml(bookingUrl(airline, r))}" target="_blank" rel="noopener noreferrer">
+          Book on ${airline === "ke" ? "Korean Air" : "Asiana"} ↗
+        </a>
         <div class="card-footnote">${routeLabel} · ${fmtDate(latest.date)}</div>
       </article>
     `;
@@ -165,7 +248,7 @@
             ? `<span style="color:var(--oz-red)">${fmtMoney(keLatest.price - ozLatest.price)}</span>`
             : keLatest.price < ozLatest.price
               ? `<span style="color:var(--ke-blue)">${fmtMoney(ozLatest.price - keLatest.price)}</span>`
-              : `<span style="color:var(--text-soft)">$0</span>`}
+              : `<span style="color:var(--text-soft)">${fmtMoney(0)}</span>`}
         </div>
         <div class="card-footnote">
           ${cheaper === "ke" ? "Korean Air is cheaper today" :
@@ -260,7 +343,6 @@
     const pricierAvg = Math.max(keS.avg, ozS.avg);
     const savingsPct = ((pricierAvg - cheaperAvg) / pricierAvg) * 100;
 
-    // Buy recommendation: is current price within 5% of 30-day min?
     const keBuyScore = ((keS.latest - keS.min30) / keS.min30) * 100;
     const ozBuyScore = ((ozS.latest - ozS.min30) / ozS.min30) * 100;
 
