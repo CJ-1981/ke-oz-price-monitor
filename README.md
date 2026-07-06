@@ -17,6 +17,7 @@ daily by a GitHub Actions cron job using the **Duffel API** and committed to
 - **Stats panel**: 90-day low/high/avg, 30-day avg, average cheaper airline,
   plus a plain-English booking recommendation
 - **Recent snapshots table** (last 14 days) with cheaper-airline highlight
+- **Email alerts** via Gmail SMTP when prices drop ≥5% (rate-limited to 1/day)
 - **Mobile-responsive** layout with iOS PWA support (apple-touch-icon, manifest)
 - **Brand-colored theme**: KE blue `#00256C`, OZ red `#C8102E`
 - **EUR as default currency** (configurable in `fetch_prices.py`)
@@ -33,12 +34,14 @@ flight-price-monitor/
 ├── css/styles.css              # All styling
 ├── js/app.js                   # Dashboard logic (vanilla JS + Chart.js)
 ├── data/prices.json            # Snapshot history (skeleton until first fetch)
+├── data/last_alert.json        # Rate-limit timestamp (auto-created on first alert)
 ├── manifest.json               # PWA manifest
 ├── icons/                      # Apple-touch-icon, PWA icons, favicons
 ├── scripts/
-│   └── fetch_prices.py         # Duffel API fetcher (run by GitHub Actions)
+│   ├── fetch_prices.py         # Duffel API fetcher (run by GitHub Actions)
+│   └── notify.py               # Email alert module (Gmail SMTP)
 ├── .github/workflows/
-│   ├── fetch-prices.yml        # Daily cron: fetch prices, commit JSON
+│   ├── fetch-prices.yml        # Daily cron: fetch prices, commit JSON, send alerts
 │   └── deploy.yml              # Deploy static site to GitHub Pages
 └── README.md
 ```
@@ -143,6 +146,62 @@ token and replace the `DUFFEL_ACCESS_TOKEN` secret. No code changes needed.
 
 ---
 
+## Email alerts via Gmail (optional)
+
+When a price drops ≥5% day-over-day, the fetcher sends an HTML email via
+Gmail SMTP. Alerts are rate-limited (1 per 24h) so your inbox stays clean.
+
+### 1. Enable 2-Step Verification on your Google account
+
+Gmail App Passwords require 2FA. If you haven't enabled it:
+1. Go to <https://myaccount.google.com/security>
+2. Find **2-Step Verification** → turn it on
+3. Follow the prompts
+
+### 2. Generate an App Password
+
+1. Go to <https://myaccount.google.com/apppasswords>
+2. Select **Mail** as the app
+3. (Optional) Give it a custom name like `ke-oz-monitor`
+4. Click **Create**
+5. Copy the 16-character password that appears (format: `abcd efgh ijkl mnop`)
+
+⚠️ This password is **separate from** your regular Gmail password — never
+reuse it. You can revoke it any time from the same page.
+
+### 3. Add three secrets to your repo
+
+In your GitHub repo: **Settings → Secrets and variables → Actions → New repository secret**
+
+| Name | Value |
+|------|-------|
+| `GMAIL_USER` | your Gmail address, e.g. `you@gmail.com` (also used as sender) |
+| `GMAIL_APP_PASSWORD` | the 16-char app password from step 2 (with or without spaces) |
+| `ALERT_RECIPIENT` | (optional) where to send alerts — defaults to `GMAIL_USER` if omitted |
+
+### 4. Tune alert thresholds (optional)
+
+The defaults are baked into `.github/workflows/fetch-prices.yml`:
+
+| Env var | Default | Meaning |
+|---------|---------|---------|
+| `ALERT_DROP_PCT` | `5` | Alert when price drops ≥X% vs yesterday |
+| `ALERT_MIN_INTERVAL_H` | `24` | Minimum hours between alerts (anti-spam) |
+
+Edit the workflow file to change them. To disable alerts without removing
+secrets, set `ALERT_DROP_PCT=100`.
+
+### 5. How alerts work
+
+- The fetcher runs daily at 09:00 UTC (or on manual trigger).
+- For each route × airline, it compares today's price to yesterday's.
+- If any drop ≥`ALERT_DROP_PCT` (or a new 30-day low), an email is sent.
+- A `data/last_alert.json` file tracks the last-sent timestamp to enforce
+  the rate limit. The fetcher commits this file alongside `prices.json`.
+- If no drops meet the threshold, no email is sent — silence is good news.
+
+---
+
 ## Customizing routes
 
 Edit the `ROUTES` list in **two** places:
@@ -192,9 +251,9 @@ browser bundle, so they're safe.
 - **Codeshares may double-count.** Duffel sometimes returns the same physical
   flight marketed under both KE and a partner (e.g. Delta). The fetcher uses
   `owner.iata_code` (the ticketing carrier) as the source of truth.
-- **No alerts in this version.** If you want email/push notifications, the
-  easiest path is to extend `fetch_prices.py` to call EmailJS or SendGrid
-  when a price drops below your threshold.
+- **Email alerts** (Gmail SMTP) trigger when a price drops ≥5% day-over-day
+  or hits a new 30-day low. Rate-limited to 1 per 24h. See
+  [Email alerts via Gmail](#email-alerts-via-gmail-optional) for setup.
 
 ---
 

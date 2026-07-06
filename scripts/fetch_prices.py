@@ -27,6 +27,10 @@ import urllib.error
 from datetime import date, timedelta
 from pathlib import Path
 
+# Local helper module (same folder)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import notify  # noqa: E402
+
 # ---------------------------------------------------------------- config
 ROUTES = [
     {"id": "FRA-ICN", "origin": "FRA", "destination": "ICN"},
@@ -135,6 +139,9 @@ def main() -> int:
     print(f"Fetching {len(ROUTES)} routes via Duffel API (version {DUFFEL_VERSION})...")
     print(f"  departure: T+{DAYS_OUT}d, return: T+{DAYS_OUT + TRIP_DAYS}d, cabin: {CABIN_CLASS}")
 
+    # Track per-route prev/curr so we can detect drops for the alert email
+    snapshots_for_alerts = []
+
     for r in ROUTES:
         rid = r["id"]
         if rid not in route_by_id:
@@ -150,15 +157,37 @@ def main() -> int:
             print(f"    error: {e}")
             continue
 
+        # Capture prev (before today's snapshot) for alert detection
+        route_obj = route_by_id[rid]
+        ke_prev = route_obj["ke"][-1] if route_obj["ke"] else None
+        oz_prev = route_obj["oz"][-1] if route_obj["oz"] else None
+
         # append (or update) today's snapshot per carrier
         for carrier, key in [("KE", "ke"), ("OZ", "oz")]:
             if carrier not in per_carrier:
                 continue
-            arr = route_by_id[rid][key]
+            arr = route_obj[key]
             if arr and arr[-1]["date"] == today_iso:
                 arr[-1]["price"] = per_carrier[carrier]
             else:
                 arr.append({"date": today_iso, "price": round(per_carrier[carrier], 2)})
+
+        ke_curr = route_obj["ke"][-1] if route_obj["ke"] else None
+        oz_curr = route_obj["oz"][-1] if route_obj["oz"] else None
+
+        snapshots_for_alerts.append({
+            "id": rid,
+            "origin": r["origin"],
+            "destination": r["destination"],
+            "origin_city": route_obj["origin_city"],
+            "destination_city": route_obj["destination_city"],
+            "ke_prev": ke_prev,
+            "ke_curr": ke_curr,
+            "oz_prev": oz_prev,
+            "oz_curr": oz_curr,
+            "ke_series": route_obj["ke"],
+            "oz_series": route_obj["oz"],
+        })
 
     # update meta
     data["meta"]["generated_at"] = today_iso
@@ -166,6 +195,20 @@ def main() -> int:
 
     DATA_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
     print(f"Wrote {DATA_PATH}")
+
+    # ---------------------------------------------------------------- alerts
+    print("\nChecking for price drops...")
+    drops = notify.detect_drops(snapshots_for_alerts)
+    if drops:
+        print(f"  Detected {len(drops)} drop(s) >= {notify.DROP_PCT_THRESHOLD:.0f}%:")
+        for d in drops:
+            tag = " (30-day low!)" if d["is_30d_low"] else ""
+            print(f"    - {d['carrier_code']} {d['route_id']}: "
+                  f"{d['prev_price']} -> {d['curr_price']} (-{d['drop_pct']:.1f}%){tag}")
+        notify.send_alerts(drops, CURRENCY.upper())
+    else:
+        print(f"  No drops >= {notify.DROP_PCT_THRESHOLD:.0f}% today. No alert sent.")
+
     return 0
 
 
