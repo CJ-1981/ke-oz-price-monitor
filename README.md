@@ -41,8 +41,8 @@ flight-price-monitor/
 │   ├── fetch_prices.py         # Duffel API fetcher (run by GitHub Actions)
 │   └── notify.py               # Email alert module (Gmail SMTP)
 ├── .github/workflows/
-│   ├── fetch-prices.yml        # Daily cron: fetch prices, commit JSON, send alerts
-│   └── deploy.yml              # Deploy static site to GitHub Pages
+│   └── fetch-prices.yml        # Daily cron: fetch prices, commit JSON, send alerts
+│                                # (Pages auto-redeploys on push to main)
 └── README.md
 ```
 
@@ -70,7 +70,8 @@ links until the first fetch populates real prices.
 
 ## Deploying to GitHub Pages
 
-### Option A — Branch-based (simplest)
+This repo uses **branch-based deployment** (the simplest mode):
+push to `main` → GitHub auto-rebuilds Pages. No deploy workflow needed.
 
 1. Create a new GitHub repo, e.g. `ke-oz-price-monitor`.
 2. Push this folder's contents to the `main` branch:
@@ -89,12 +90,12 @@ links until the first fetch populates real prices.
    https://YOUR_USERNAME.github.io/ke-oz-price-monitor/
    ```
 
-### Option B — Actions-based (recommended if you want CI control)
-
-1. Follow step 1–2 above.
-2. In **Settings → Pages → Source**, choose **GitHub Actions**.
-3. The included `.github/workflows/deploy.yml` will build & deploy on every
-   push to `main`.
+> If you prefer **GitHub Actions** deployment mode instead, switch the Pages
+> source to "GitHub Actions" and add a `deploy.yml` workflow using
+> `actions/configure-pages@v5` + `actions/upload-pages-artifact@v3` +
+> `actions/deploy-pages@v4`. Branch-based mode is recommended for this repo
+> because it requires zero workflow config and redeploys automatically on
+> every push.
 
 ---
 
