@@ -36,7 +36,7 @@ ROUTES = [
 DAYS_OUT = 60
 TRIP_DAYS = 7
 ADULTS = 1
-CURRENCY = "USD"
+CURRENCY = "EUR"
 MAX_OFFERS = 50
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "prices.json"

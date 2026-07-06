@@ -32,7 +32,14 @@
   };
 
   // ---------------------------------------------------------------- utils
-  const fmtMoney = (n) => "$" + Math.round(n).toLocaleString("en-US");
+  const fmtMoney = (n) => {
+    const sym = (DATA && DATA.meta && DATA.meta.currency) || "USD";
+    const symbols = { USD: "$", EUR: "€", GBP: "£", KRW: "₩", JPY: "¥" };
+    const sym_str = symbols[sym] || sym + " ";
+    const rounded = Math.round(Math.abs(n)).toLocaleString("en-US");
+    const sign = n < 0 ? "−" : "";
+    return sign + sym_str + rounded;
+  };
   const fmtDate = (iso) => {
     const d = new Date(iso + "T00:00:00");
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -129,6 +136,7 @@
                     keLatest.price > ozLatest.price ? "oz" : "tie";
 
     const routeLabel = `${r.origin_city} ↔ ${r.destination_city}`;
+    const cur = (DATA && DATA.meta && DATA.meta.currency) || "USD";
 
     const card = (airline, latest, pct, isRecommend) => `
       <article class="price-card ${airline} ${isRecommend ? "recommend" : ""}">
@@ -137,7 +145,7 @@
           <span class="airline-dot"></span>
           ${airline === "ke" ? "Korean Air (KE)" : "Asiana Airlines (OZ)"}
         </div>
-        <div class="card-price"><span class="currency">USD</span>${Math.round(latest.price).toLocaleString()}</div>
+        <div class="card-price"><span class="currency">${cur}</span>${Math.round(latest.price).toLocaleString()}</div>
         <div class="card-delta ${pct > 0.3 ? "up" : pct < -0.3 ? "down" : "flat"}">
           ${pct > 0.3 ? "▲" : pct < -0.3 ? "▼" : "→"}
           ${pct > 0 ? "+" : ""}${pct.toFixed(1)}% vs yesterday
@@ -233,9 +241,9 @@
             ticks: {
               color: "#8793a4",
               font: { size: 11 },
-              callback: (v) => "$" + v.toLocaleString(),
+              callback: (v) => fmtMoney(v),
             },
-            title: { display: true, text: "USD round-trip economy", color: "#8793a4", font: { size: 11 } },
+            title: { display: true, text: `${(DATA && DATA.meta && DATA.meta.currency) || "USD"} round-trip economy`, color: "#8793a4", font: { size: 11 } },
           },
         },
       },
@@ -323,7 +331,7 @@
           <td>${fmtDate(ke.date)}</td>
           <td class="num">${fmtMoney(ke.price)}</td>
           <td class="num">${fmtMoney(oz.price)}</td>
-          <td class="num ${diffClass}">${diffSign}${fmtMoney(Math.abs(diff)).replace("$", diff < 0 ? "−$" : "$")}</td>
+          <td class="num ${diffClass}">${diffSign}${fmtMoney(Math.abs(diff))}</td>
           ${cheaperCell}
         </tr>
       `);

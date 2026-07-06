@@ -19,6 +19,7 @@ the frontend reads at load time.
 - **Recent snapshots table** (last 14 days) with cheaper-airline highlight
 - **Mobile-responsive** layout
 - **Brand-colored theme**: KE blue `#00256C`, OZ red `#C8102E`
+- **EUR as default currency** (configurable in `fetch_prices.py` and `generate_mock_prices.py`)
 - **No build step, no framework** — just HTML/CSS/vanilla JS
 
 ---
