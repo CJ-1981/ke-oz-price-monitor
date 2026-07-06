@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>KE/OZ Flight Price Monitor</title>
+  <meta name="description" content="Daily price snapshots for Korean Air and Asiana Airlines flights from Seoul Incheon to the US and Europe." />
+
+  <!-- Theme + PWA -->
+  <meta name="theme-color" content="#00256C" />
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- iOS PWA: full-screen web app + status bar style -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="KE/OZ Prices" />
+
+  <!-- iOS home-screen icon (180x180, no rounding — iOS masks itself) -->
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
+
+  <!-- Older iOS sizes (optional, iOS auto-resizes the 180) -->
+  <link rel="apple-touch-icon" sizes="167x167" href="icons/apple-touch-icon.png" />
+  <link rel="apple-touch-icon" sizes="152x152" href="icons/apple-touch-icon.png" />
+  <link rel="apple-touch-icon" sizes="120x120" href="icons/apple-touch-icon.png" />
+
+  <!-- Browser tab favicon -->
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png" />
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="container header-inner">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">✈️</span>
+        <div>
+          <h1>KE / OZ Price Monitor</h1>
+          <p class="tagline">Korean Air &amp; Asiana Airlines · Seoul Incheon ↔ United States</p>
+        </div>
+      </div>
+      <div class="header-meta" id="header-meta" aria-live="polite">
+        <span class="meta-pill" id="meta-updated">Loading…</span>
+        <span class="meta-pill" id="meta-currency">USD · economy round-trip</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <nav class="route-tabs" id="route-tabs" aria-label="Route selector"></nav>
+
+    <section class="cards-grid" id="cards-grid" aria-label="Latest prices"></section>
+
+    <section class="panel chart-panel">
+      <div class="panel-header">
+        <h2>90-Day Price History</h2>
+        <div class="chart-controls">
+          <label class="toggle">
+            <input type="checkbox" id="show-ke" checked />
+            <span class="ke-dot"></span>Korean Air
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="show-oz" checked />
+            <span class="oz-dot"></span>Asiana
+          </label>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="price-chart" role="img" aria-label="Line chart showing 90-day price history for Korean Air and Asiana"></canvas>
+      </div>
+    </section>
+
+    <section class="panel stats-panel">
+      <h2>Stats &amp; Recommendation</h2>
+      <div class="stats-grid" id="stats-grid"></div>
+    </section>
+
+    <section class="panel table-panel">
+      <h2>Recent Snapshots</h2>
+      <div class="table-wrap">
+        <table id="snapshot-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th class="num">Korean Air</th>
+              <th class="num">Asiana</th>
+              <th class="num">Δ (KE − OZ)</th>
+              <th>Cheaper</th>
+            </tr>
+          </thead>
+          <tbody id="snapshot-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <div class="container">
+      <p>
+        Static site for GitHub Pages · Data refreshed daily via GitHub Actions.
+        <span id="data-note"></span>
+      </p>
+      <p class="fineprint">
+        Prices are indicative snapshots, not live quotes. Always verify on the airline website before booking.
+      </p>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

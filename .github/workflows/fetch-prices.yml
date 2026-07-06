@@ -1,0 +1,52 @@
+name: Fetch flight prices
+
+on:
+  schedule:
+    # 09:00 UTC every day = ~6 PM KST
+    - cron: "0 9 * * *"
+  workflow_dispatch: {}  # allow manual runs from the Actions tab
+
+permissions:
+  contents: write  # required to commit prices.json back to the repo
+
+concurrency:
+  group: fetch-prices
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch prices and update data/prices.json
+        env:
+          AMADEUS_CLIENT_ID: ${{ secrets.AMADEUS_CLIENT_ID }}
+          AMADEUS_CLIENT_SECRET: ${{ secrets.AMADEUS_CLIENT_SECRET }}
+          AMADEUS_HOST: test.api.amadeus.com
+        run: python scripts/fetch_prices.py
+
+      - name: Commit updated data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/prices.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore(data): daily price snapshot ($(date -u +%Y-%m-%d))"
+            git push
+          fi
+
+      - name: Trigger GitHub Pages rebuild
+        if: success()
+        uses: actions/deploy-pages@v4
+        # Only needed if you use the "Deploy from a branch" mode; if your
+        # Pages is configured to deploy on push to main, the commit above
+        # already triggers a rebuild and you can remove this step.
